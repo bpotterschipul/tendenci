@@ -8,6 +8,8 @@ from tinymce.widgets import TinyMCE
 from tendenci.core.perms.forms import TendenciBaseForm
 from tendenci.core.base.fields import SplitDateTimeField
 from django.utils.translation import ugettext_lazy as _
+from django.utils.safestring import mark_safe
+from django.core.urlresolvers import reverse
 
 from tendenci.addons.directories.models import Directory, DirectoryPricing
 from tendenci.addons.directories.utils import (get_payment_method_choices,
@@ -21,7 +23,12 @@ ALLOWED_LOGO_EXT = (
     '.jpeg',
     '.gif',
     '.png' 
-)   
+)
+
+request_duration_defaults = {
+    'label': _('Requested Duration'),
+    'help_text': mark_safe('<a href="%s" id="add_id_pricing">Add Pricing Options</a>' % '/directories/pricing/add/'),
+}
                     
 class DirectoryForm(TendenciBaseForm):
     body = forms.CharField(required=False,
@@ -43,8 +50,8 @@ class DirectoryForm(TendenciBaseForm):
     email = EmailVerificationField(label=_("Email"), required=False)
     email2 = EmailVerificationField(label=_("Email 2"), required=False)
     
-    pricing = forms.ModelChoiceField(label=_('Requested Duration'), 
-                    queryset=DirectoryPricing.objects.filter(status=True).order_by('duration'))
+    pricing = forms.ModelChoiceField(queryset=DirectoryPricing.objects.filter(status=True).order_by('duration'),
+                    **request_duration_defaults)
     
     class Meta:
         model = Directory

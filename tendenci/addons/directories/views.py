@@ -4,11 +4,12 @@ from PIL import Image
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
 from django.template import RequestContext
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpResponse
 from django.core.urlresolvers import reverse
 from django.contrib import messages
 from django.template.defaultfilters import slugify
 from django.conf import settings
+from django.utils.html import escape
 
 from tendenci.core.site_settings.utils import get_setting
 from tendenci.core.base.http import Http403
@@ -322,6 +323,9 @@ def pricing_add(request, form_class=DirectoryPricingForm, template_name="directo
                 directory_pricing.status = 1
                 directory_pricing.save(request.user)
                 
+                if "_popup" in request.REQUEST:
+                    return HttpResponse('<script type="text/javascript">opener.dismissAddAnotherPopup(window, "%s", "%s");</script>' % (escape(directory_pricing.pk), escape(directory_pricing)))
+
                 return HttpResponseRedirect(reverse('directory_pricing.view', args=[directory_pricing.id]))
         else:
             form = form_class(user=request.user)
