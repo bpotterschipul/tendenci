@@ -1,10 +1,10 @@
-from django.conf import settings
 from django.utils.translation import ugettext_noop as _
-from django.db.models.signals import post_syncdb
+from south.signals import post_migrate
 
 from tendenci.apps.notifications import models as notification
 
-def create_notice_types(app, created_models, verbosity, **kwargs):
+
+def create_notice_types(app, **kwargs):
     notification.create_notice_type(
         'event_added',
         _('Event Added'),
@@ -30,4 +30,9 @@ def create_notice_types(app, created_models, verbosity, **kwargs):
         _('Event Registration Cancelled'),
         _('Notify administrators that someone has cancelled their event registration'))
 
-post_syncdb.connect(create_notice_types, sender=notification)
+    notification.create_notice_type(
+        'event_registration_end_recap',
+        _('Recap of end of event registration'),
+        _('Notify administrators that registration for the event has ended.'))
+
+post_migrate.connect(create_notice_types, sender=notification)
