@@ -131,6 +131,9 @@ class Invoice(models.Model):
     class Meta:
         permissions = (("view_invoice", "Can view invoice"), )
 
+    def __unicode__(self):
+        return "Invoice %s" % self.pk
+
     def set_creator(self, user):
         """
         Sets creator fields.
@@ -199,6 +202,17 @@ class Invoice(models.Model):
     @models.permalink
     def get_absolute_url(self):
         return ('invoice.view', [self.id])
+
+    @models.permalink
+    def get_discount_url(self):
+        from tendenci.apps.discounts.models import Discount
+        if self.discount_code:
+            try:
+                discount = Discount.objects.get(discount_code=self.discount_code)
+                return ('discount.detail', [discount.id])
+            except Discount.DoesNotExist:
+                return ''
+        return ''
 
     def save(self, user=None):
         """

@@ -16,7 +16,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import messages
-from django.shortcuts import render_to_response, redirect, get_object_or_404
+from django.shortcuts import render, render_to_response, redirect, get_object_or_404
 from django.template import RequestContext
 from django.http import Http404, HttpResponseRedirect, HttpResponse
 from django.db.models.fields import AutoField
@@ -220,6 +220,21 @@ def download_template(request, slug=''):
     """
     from tendenci.addons.memberships.utils import make_csv
     return make_csv(slug=slug)
+
+
+def membership_applications(request, template_name="memberships/applications/list.html"):
+
+    apps = MembershipApp.objects.all()
+
+    if not request.user.profile.is_superuser:
+        apps = apps.filter(status_detail='published')
+
+    if request.user.is_anonymous():
+        apps = apps.filter(allow_anonymous_view=True)
+
+    EventLog.objects.log()
+
+    return render(request, template_name, {'apps': apps})
 
 
 def application_detail_default(request, **kwargs):
@@ -774,38 +789,9 @@ def entry_delete(request, id=0, template_name="memberships/entries/delete.html")
 @login_required
 def application_entries_search(request, template_name="memberships/entries/search.html"):
     """
-    Displays a page for searching membership application entries.
+    Redirect to the admin area membership list view.
     """
-    user = request.user
-    query = request.GET.get('q')
-    if get_setting('site', 'global', 'searchindex') and query:
-        entries = AppEntry.objects.search(query, user=request.user)
-    else:
-        status = request.GET.get('status', None)
-        approve_perm = has_perm(user, 'memberships.approve_membership')
-        if approve_perm:
-            filters = get_query_filters(user, 'memberships.view_appentry', super_perm=True)
-        else:
-            filters = get_query_filters(user, 'memberships.view_appentry')
-        entries = AppEntry.objects.filter(filters).distinct()
-        if status:
-            status_filter = get_status_filter(status)
-            entries = entries.filter(status_filter)
-
-        entries = entries.select_related()
-
-    entries = entries.order_by('-entry_time')
-
-    apps = App.objects.all()
-    types = MembershipType.objects.all()
-
-    EventLog.objects.log()
-
-    return render_to_response(template_name, {
-        'entries': entries,
-        'apps': apps,
-        'types': types,
-        }, context_instance=RequestContext(request))
+    return redirect("admin:memberships_membershipdefault_changelist")
 
 
 @login_required
@@ -1537,6 +1523,8 @@ def membership_default_add(request, slug='', template='memberships/applications/
     """
     Default membership application form.
     """
+    from tendenci.addons.memberships.models import Notice
+
     user = None
     membership = None
     username = request.GET.get('username', u'')
@@ -1563,31 +1551,41 @@ def membership_default_add(request, slug='', template='memberships/applications/
         if not corp_app:
             raise Http404
 
-        #app = corp_app.memb_app
         app = corp_app.memb_app
 
         cm_id = kwargs.get('cm_id')
         if not cm_id:
             # redirect them to the corp_pre page
-            return redirect(reverse('membership_default.corp_pre_add'))
+            redirect_url = reverse('membership_default.corp_pre_add')
+
+            if username:
+                return HttpResponseRedirect(
+                    '%s?username=%s' % (redirect_url, username))
+            return redirect(redirect_url)
+
         # check if they have verified their email or entered the secret code
         corp_membership = get_object_or_404(CorpMembership, id=cm_id)
+
+        # imv = individual membership verification
         imv_id = kwargs.get('imv_id', 0)
         imv_guid = kwargs.get('imv_guid')
+
         secret_hash = kwargs.get('secret_hash', '')
 
         is_verified = False
         authentication_method = corp_app.authentication_method
+
         if request.user.profile.is_superuser or authentication_method == 'admin':
             is_verified = True
         elif authentication_method == 'email':
             try:
-                indiv_veri = IndivEmailVerification.objects.get(pk=imv_id,
-                                                              guid=imv_guid)
-                if indiv_veri.verified:
-                    is_verified = True
+                indiv_veri = IndivEmailVerification.objects.get(
+                    pk=imv_id, guid=imv_guid)
+                is_verified = indiv_veri.verified
+
             except IndivEmailVerification.DoesNotExist:
                 pass
+
         elif authentication_method == 'secret_code':
             tmp_secret_hash = md5('%s%s' % (corp_membership.corp_profile.secret_code,
                         request.session.get('corp_hash_random_string', ''))
@@ -1599,18 +1597,24 @@ def membership_default_add(request, slug='', template='memberships/applications/
             return redirect(reverse('membership_default.corp_pre_add',
                                     args=[cm_id]))
 
-    else:
+    else:  # regular membership
+
         app = get_object_or_404(MembershipApp, slug=slug)
 
         if app.use_for_corp:
-            return redirect(reverse('membership_default.corp_pre_add'))
+            redirect_url = reverse('membership_default.corp_pre_add')
+
+            if username:
+                return HttpResponseRedirect(
+                    '%s?username=%s' % (redirect_url, username))
+            return redirect(redirect_url)
 
     if not app:
         raise Http404
 
     if join_under_corporate:
         app_fields = app.fields.filter(Q(display=True) | Q(
-                            field_name='corporate_membership_id'))
+            field_name='corporate_membership_id'))
     else:
         app_fields = app.fields.filter(display=True)
 
@@ -1631,7 +1635,12 @@ def membership_default_add(request, slug='', template='memberships/applications/
             'email': user.email,
         }
 
-    user_form = UserForm(app_fields, request.POST or None, initial=user_initial)
+    user_form = UserForm(
+        app_fields,
+        request.POST or None,
+        request=request,
+        initial=user_initial)
+
     profile_form = ProfileForm(app_fields, request.POST or None)
 
     profile_initial = {}
@@ -1739,7 +1748,7 @@ def membership_default_add(request, slug='', template='memberships/applications/
                 app_fields, post_values, initial=membership_initial, **params)
 
             # tuple with boolean items
-            good = (
+            forms_validate = (
                 user_form.is_valid(),
                 profile_form.is_valid(),
                 demographics_form.is_valid(),
@@ -1748,7 +1757,7 @@ def membership_default_add(request, slug='', template='memberships/applications/
             )
 
             # form is valid
-            if all(good):
+            if all(forms_validate):
 
                 customer = user_form.save()
 
@@ -1808,12 +1817,31 @@ def membership_default_add(request, slug='', template='memberships/applications/
             for membership in memberships:
                 membership.membership_set = membership_set
 
-                requires_approval = (
+                approval_required = (
                     membership.approval_required(),
                     join_under_corporate and authentication_method == 'admin')
 
-                if any(requires_approval):
+                if any(approval_required):
                     membership.pend()
+                    membership.save()  # save pending status
+
+                    if membership.is_renewal():
+                        Notice.send_notice(
+                            request=request,
+                            emails=membership.user.email,
+                            notice_type='renewal',
+                            membership=membership,
+                            membership_type=membership.membership_type,
+                        )
+
+                    else:
+                        Notice.send_notice(
+                            request=request,
+                            emails=membership.user.email,
+                            notice_type='join',
+                            membership=membership,
+                            membership_type=membership.membership_type,
+                        )
                 else:
                     membership.approve(request_user=customer)
                     membership.send_email(request, 'approve')
@@ -1824,12 +1852,7 @@ def membership_default_add(request, slug='', template='memberships/applications/
 
                 # save application fields
                 membership.save()
-
-                if membership.application_approved:
-                    membership.save_invoice(status_detail='tendered')
-                else:
-                    membership.save_invoice(status_detail='estimate')
-
+                membership.save_invoice(status_detail='tendered')
                 membership.user.profile.refresh_member_number()
 
                 # log an event
@@ -1855,15 +1878,18 @@ def membership_default_add(request, slug='', template='memberships/applications/
 
             # send email notification to admin
             recipients = get_notice_recipients(
-                                       'module', 'memberships',
-                                       'membershiprecipients')
+                'module', 'memberships',
+                'membershiprecipients')
+
             extra_context = {
                 'membership': membership,
                 'app': app,
                 'request': request
             }
-            send_email_notification('membership_joined_to_admin', recipients,
-                                    extra_context)
+            send_email_notification(
+                'membership_joined_to_admin',
+                recipients,
+                extra_context)
 
             # redirect: confirmation page
             return HttpResponseRedirect(reverse(
@@ -1886,17 +1912,6 @@ def membership_default_add(request, slug='', template='memberships/applications/
 def membership_default_corp_pre_add(request, cm_id=None,
                     template_name="memberships/applications/corp_pre_add.html"):
 
-#    [app] = MembershipApp.objects.filter(status=True,
-#        status_detail__in=['active', 'published']).order_by('id')[:1] or [None]
-#
-#    if not app:
-#        raise Http404
-#
-#    if not hasattr(app, 'corp_app'):
-#        raise Http404
-#
-#    if not app.corp_app:
-#        raise Http404
     corp_app = CorpMembershipApp.objects.current_app()
 
     if not hasattr(corp_app, 'memb_app'):
@@ -1915,6 +1930,7 @@ def membership_default_corp_pre_add(request, cm_id=None,
         from utils import get_corporate_membership_choices
         cm_choices = get_corporate_membership_choices()
         form.fields['corporate_membership_id'].choices = cm_choices
+
         if cm_id:
             form.fields['corporate_membership_id'].initial = cm_id
         form.auth_method = 'corporate_membership_id'
@@ -1932,8 +1948,7 @@ def membership_default_corp_pre_add(request, cm_id=None,
         if form.is_valid():
             # find the corporate_membership_id and redirect to membership add
             if form.auth_method == 'corporate_membership_id':
-                corporate_membership_id = form.cleaned_data[
-                                                'corporate_membership_id']
+                corporate_membership_id = form.cleaned_data['corporate_membership_id']
             else:
                 corporate_membership_id = form.corporate_membership_id
 
@@ -1995,8 +2010,13 @@ def membership_default_corp_pre_add(request, cm_id=None,
                                                 corporate_membership_id,
                                                 secret_hash]))
 
-            return redirect(reverse('membership_default.add_under_corp',
-                                    args=[corporate_membership_id]))
+            passed_username = request.POST.get('username', u'')
+            redirect_url = reverse('membership_default.add_under_corp', args=[corporate_membership_id])
+
+            if passed_username:
+                return HttpResponseRedirect('%s?username=%s' % (redirect_url, passed_username))
+            return redirect(redirect_url)
+
 
     c = {'app': app, "form": form}
 
@@ -2195,10 +2215,10 @@ def report_active_members(request, template_name='reports/membership_list.html')
         mems = mems.order_by('-membership_type')
         is_ascending_type = True
     elif sort == 'subscription':
-        mems = mems.order_by('subscribe_dt')
+        mems = mems.order_by('join_dt')
         is_ascending_subscription = False
     elif sort == '-subscription':
-        mems = mems.order_by('-subscribe_dt')
+        mems = mems.order_by('-join_dt')
         is_ascending_subscription = True
     elif sort == 'expiration':
         mems = mems.order_by('expire_dt')

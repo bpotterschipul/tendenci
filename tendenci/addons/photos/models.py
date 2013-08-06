@@ -573,7 +573,7 @@ class PhotoSet(TendenciBaseModel):
     def __unicode__(self):
         return self.name
 
-    def save(self):
+    def save(self, *args, **kwargs):
         self.guid = self.guid or unicode(uuid.uuid1())
 
         super(PhotoSet, self).save()
@@ -716,7 +716,8 @@ class Image(OrderingBaseModel, ImageModel, TendenciBaseModel):
        # caching.instance_cache_add(self, self.pk)
 
         if not self.is_public_photo() or not self.is_public_photoset():
-            set_s3_file_permission(self.image.file, public=False)
+            if hasattr(settings, 'USE_S3_STORAGE') and settings.USE_S3_STORAGE and hasattr(self.image, 'file'):
+                set_s3_file_permission(self.image.file, public=False)
             cache_set = cache.get("photos_cache_set.%s" % self.pk)
             if cache_set is not None:
                 # TODO remove cached images
@@ -727,6 +728,9 @@ class Image(OrderingBaseModel, ImageModel, TendenciBaseModel):
         """
         Delete image-file and all resized versions
         """
+        
+        super(Image, self).delete(*args, **kwargs)
+        
         if self.image:
             cache_path = self.cache_path()
 
@@ -744,7 +748,7 @@ class Image(OrderingBaseModel, ImageModel, TendenciBaseModel):
             # delete actual image; do not save() self.instance
             self.image.delete(save=False)
 
-        super(Image, self).delete(*args, **kwargs)
+        
 
     @models.permalink
     def get_absolute_url(self):

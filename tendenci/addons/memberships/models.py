@@ -95,6 +95,8 @@ FIELD_FUNCTIONS = (
 )
 FIELD_MAX_LENGTH = 2000
 
+VALID_MEMBERSHIP_STATUS_DETAIL = ['active', 'pending', 'expired', 'archive', 'disapproved']
+
 
 class MembershipType(OrderingBaseModel, TendenciBaseModel):
     guid = models.CharField(max_length=50)
@@ -1190,12 +1192,12 @@ class MembershipDefault(TendenciBaseModel):
 
     def is_renewal(self):
         """
-        Checks if there are older memberships
-        of this same membership type
+        Checks if there are active or expired memberships
+        of this same membership type bound to this user
         """
         return self.user.membershipdefault_set.filter(
-            membership_type=self.membership_type).exclude(
-                status_detail='disapproved').exists()
+            membership_type=self.membership_type).filter(
+                Q(status_detail='active') | Q(status_detail='expired')).exists()
 
     def can_renew(self):
         """
@@ -1665,11 +1667,11 @@ class MembershipDefault(TendenciBaseModel):
         from tendenci.apps.notifications.utils import send_welcome_email
 
         open_renewal = (
-            self.renewal,
+            self.is_renewal(),
             not self.membership_type.renewal_require_approval)
 
         open_join = (
-            not self.renewal,
+            not self.is_renewal(),
             not self.membership_type.require_approval)
 
         can_approve = all(open_renewal) or all(open_join)
@@ -1705,6 +1707,7 @@ class MembershipDefault(TendenciBaseModel):
 
             Notice.send_notice(
                 request=request,
+                emails=self.user.email,
                 notice_type='approve',
                 membership=self,
                 membership_type=self.membership_type,
@@ -2201,11 +2204,6 @@ class Notice(models.Model):
         The membership object takes priority over entry object
         """
         context = self.get_default_context(membership)
-        # autoescape off for subject to avoid HTML escaping
-        self.subject = '%s%s%s' % (
-                        "{% autoescape off %}",
-                        self.subject,
-                        "{% endautoescape %}")
         return self.build_notice(self.subject, context=context)
 
     def get_content(self, membership=None):
@@ -2303,7 +2301,8 @@ class Notice(models.Model):
         recipients = list(set(membership_recipients + admin_recipients))
 
         if recipients:
-            notification.send_emails(recipients,
+            notification.send_emails(
+                recipients,
                 'membership_%s_to_admin' % template_type, {
                 'request': request,
                 'membership': membership,
@@ -2395,7 +2394,7 @@ class MembershipApp(TendenciBaseModel):
 
 class MembershipAppField(OrderingBaseModel):
     LABEL_MAX_LENGTH = 2000
-    FIELD_TYPE_CHOICES = (
+    FIELD_TYPE_CHOICES1 = (
                     ("CharField", _("Text")),
                     ("CharField/django.forms.Textarea", _("Paragraph Text")),
                     ("BooleanField", _("Checkbox")),
@@ -2407,8 +2406,11 @@ class MembershipAppField(OrderingBaseModel):
                     ("FileField", _("File upload")),
                     ("DateField/django.forms.extras.SelectDateWidget", _("Date")),
                     ("DateTimeField", _("Date/time")),
+                )
+    FIELD_TYPE_CHOICES2 = (
                     ("section_break", _("Section Break")),
                 )
+    FIELD_TYPE_CHOICES = FIELD_TYPE_CHOICES1 + FIELD_TYPE_CHOICES2
 
     membership_app = models.ForeignKey("MembershipApp", related_name="fields")
     label = models.CharField(_("Label"), max_length=LABEL_MAX_LENGTH)

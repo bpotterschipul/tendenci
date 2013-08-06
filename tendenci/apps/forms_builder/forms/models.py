@@ -86,8 +86,8 @@ class Form(TendenciBaseModel):
     email_copies = models.CharField(_("Send copies to"), blank=True,
         help_text=_("One or more email addresses, separated by commas"),
         max_length=2000)
-    completion_url = models.URLField(_("Completion URL"), blank=True, null=True,
-        help_text=_("Redirect to this page after form completion."))
+    completion_url = models.CharField(_("Completion URL"), max_length=1000, blank=True, null=True,
+        help_text=_("Redirect to this page after form completion. Absolute URLS should begin with http. Relative URLs should begin with a forward slash (/)."))
     template = models.CharField(_('Template'), max_length=50, blank=True)
 
     # payments
@@ -135,10 +135,9 @@ class Form(TendenciBaseModel):
     admin_link_export.short_description = ""
 
     def has_files(self):
-        for entry in self.entries.all():
-            for field in entry.fields.all():
-                if field.field.field_type == 'FileField':
-                    return True
+        for field in self.fields.all():
+            if field.field_type == 'FileField':
+                return True
         return False
 
 
@@ -223,8 +222,6 @@ class Field(OrderingBaseModel):
                             group_membership.owner_id = user.id
                             group_membership.owner_username = user.username
                             group_membership.save()
-                    else:
-                        entry.subscribe(group)  # subscribe form-entry to a group
 
 
 class FormEntry(models.Model):
@@ -251,29 +248,6 @@ class FormEntry(models.Model):
     @models.permalink
     def get_absolute_url(self):
         return ("form_entry_detail", (), {"id": self.pk})
-
-    def subscribe(self, group):
-        """
-        Subscribe FormEntry to group specified.
-        """
-        # avoiding circular imports
-        from tendenci.apps.subscribers.models import GroupSubscription as GS
-        try:
-            GS.objects.get(group=group, subscriber=self)
-        except GS.DoesNotExist:
-            GS.objects.create(group=group, subscriber=self)
-
-    def unsubscribe(self, group):
-        """
-        Unsubscribe FormEntry from group specified
-        """
-        # avoiding circular imports
-        from tendenci.apps.subscribers.models import GroupSubscription as GS
-        try:
-            sub = GS.objects.get(group=group, subscriber=self)
-            sub.delete()
-        except GS.DoesNotExist:
-            pass
 
     def entry_fields(self):
         return self.fields.all().order_by('field__position')
@@ -387,6 +361,10 @@ class FormEntry(models.Model):
 
         return description
 
+    def set_group_subscribers(self):
+        for entry in self.fields.filter(field__field_function="GroupSubscription"):
+            entry.field.execute_function(self, entry.value, user=self.creator)
+
 
 class FieldEntry(models.Model):
     """
@@ -414,11 +392,6 @@ class FieldEntry(models.Model):
         if field_class == 'FileField':
             return False
         return True
-
-    def save(self, *args, **kwargs):
-        user = kwargs.pop('user', None)
-        super(FieldEntry, self).save(*args, **kwargs)
-        self.field.execute_function(self.entry, self.value, user=user)
 
 
 class Pricing(models.Model):
@@ -449,6 +422,9 @@ class Pricing(models.Model):
     has_trial_period = models.BooleanField(default=False)
     trial_period_days = models.IntegerField(default=0)
     trial_amount = models.DecimalField(max_digits=15, decimal_places=2, blank=True, null=True, default=0.0)
+
+    class Meta:
+        ordering = ["pk"]
 
     def __unicode__(self):
         currency_symbol = get_setting("site", "global", "currencysymbol")

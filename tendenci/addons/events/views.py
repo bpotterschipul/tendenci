@@ -2,21 +2,15 @@
 # anonymous registration impementation of events in the registration
 # module.
 
-import os
 import re
-import time
 import calendar
 import itertools
-import cPickle
-import threading
 import subprocess
 
 from datetime import datetime
 from datetime import date, timedelta
 from decimal import Decimal
-from haystack.query import SearchQuerySet
 
-from django.conf import settings
 from django.db.models import Q
 from django.utils.translation import ugettext_lazy as _
 from django.utils import simplejson as json
@@ -27,7 +21,6 @@ from django.template import RequestContext
 from django.http import HttpResponseRedirect, Http404, HttpResponse
 from django.http import QueryDict
 from django.core.urlresolvers import reverse
-from django.core.files.storage import default_storage
 from django.contrib import messages
 from django.template.loader import render_to_string
 from django.template.defaultfilters import date as date_filter
@@ -35,67 +28,113 @@ from django.forms.formsets import formset_factory
 from django.forms.models import modelformset_factory, \
     inlineformset_factory
 from django.views.decorators.csrf import csrf_exempt
-from django.utils import simplejson as json
 from django.db import connection
 
 from tendenci.core.base.http import Http403
 from tendenci.core.site_settings.utils import get_setting
-from tendenci.core.perms.decorators import is_enabled
-from tendenci.core.perms.utils import (has_perm, get_notice_recipients,
-    get_query_filters, update_perms_and_save, has_view_perm, assign_files_perms)
+from tendenci.core.perms.decorators import is_enabled, superuser_required
+from tendenci.core.perms.utils import (
+    has_perm,
+    get_notice_recipients,
+    get_query_filters,
+    update_perms_and_save,
+    has_view_perm,
+    assign_files_perms)
 from tendenci.core.event_logs.models import EventLog
 from tendenci.core.meta.models import Meta as MetaTags
 from tendenci.core.meta.forms import MetaForm
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from tendenci.core.files.models import File
 from tendenci.core.theme.shortcuts import themed_response as render_to_response
 from tendenci.core.exports.utils import run_export_task
 from tendenci.core.imports.forms import ImportForm
 from tendenci.core.imports.models import Import
-from tendenci.core.base.decorators import password_required
 from tendenci.core.base.utils import convert_absolute_urls
-from tendenci.core.imports.utils import (extract_from_excel,
-                render_excel)
+from tendenci.core.imports.utils import (
+    render_excel)
 
 from tendenci.apps.discounts.models import Discount
 from tendenci.apps.notifications import models as notification
 from tendenci.addons.events.ics.utils import run_precreate_ics
 
-from tendenci.addons.events.models import (Event,
-    Registration, Registrant, Speaker, Organizer, Type,
-    RegConfPricing, Addon, AddonOption, CustomRegForm,
-    CustomRegFormEntry, CustomRegField, CustomRegFieldEntry,
-    RegAddonOption, RegistrationConfiguration, EventPhoto, Place)
-from tendenci.addons.events.forms import (EventForm, Reg8nEditForm,
-    PlaceForm, SpeakerForm, OrganizerForm, TypeForm, MessageAddForm,
-    RegistrationForm, RegistrantForm, RegistrantBaseFormSet,
-    Reg8nConfPricingForm, PendingEventForm, AddonForm, AddonOptionForm,
-    FormForCustomRegForm, RegConfPricingBaseModelFormSet, RegistrantSearchForm,
-    RegistrationPreForm, EventICSForm, EmailForm, DisplayAttendeesForm, ReassignTypeForm)
-from tendenci.addons.events.utils import (email_registrants,
-    render_event_email, get_default_reminder_template,
-    add_registration, registration_has_started, registration_has_ended,
-    registration_earliest_time, get_pricing, clean_price,
-    get_event_spots_taken, get_ievent, split_table_price,
-    copy_event, email_admins, get_active_days, get_ACRF_queryset,
-    get_custom_registrants_initials, render_registrant_excel,
-    event_import_process, check_month)
+from tendenci.addons.events.models import (
+    Event,
+    Registration,
+    Registrant,
+    Speaker,
+    Organizer,
+    Type,
+    RegConfPricing,
+    Addon,
+    AddonOption,
+    CustomRegForm,
+    CustomRegFormEntry,
+    CustomRegField,
+    CustomRegFieldEntry,
+    RegAddonOption,
+    RegistrationConfiguration,
+    EventPhoto,
+    Place)
+from tendenci.addons.events.forms import (
+    EventForm,
+    Reg8nEditForm,
+    PlaceForm,
+    SpeakerForm,
+    OrganizerForm,
+    TypeForm,
+    MessageAddForm,
+    RegistrationForm,
+    RegistrantForm,
+    RegistrantBaseFormSet,
+    Reg8nConfPricingForm,
+    PendingEventForm,
+    AddonForm,
+    AddonOptionForm,
+    FormForCustomRegForm,
+    RegConfPricingBaseModelFormSet,
+    GlobalRegistrantSearchForm,
+    EventICSForm,
+    EmailForm,
+    DisplayAttendeesForm,
+    ReassignTypeForm,
+    EventRegistrantSearchForm,
+    MemberRegistrationForm)
+from tendenci.addons.events.utils import (
+    email_registrants,
+    render_event_email,
+    get_default_reminder_template,
+    add_registration,
+    registration_has_started,
+    registration_has_ended,
+    registration_earliest_time,
+    get_pricing,
+    clean_price,
+    get_event_spots_taken,
+    get_ievent,
+    copy_event,
+    email_admins,
+    get_active_days,
+    get_ACRF_queryset,
+    get_custom_registrants_initials,
+    render_registrant_excel,
+    event_import_process,
+    check_month,
+    create_member_registration)
 from tendenci.addons.events.addons.forms import RegAddonForm
 from tendenci.addons.events.addons.formsets import RegAddonBaseFormSet
 from tendenci.addons.events.addons.utils import get_available_addons
-from tendenci.core.base.utils import convert_absolute_urls
-from tendenci.apps.redirects.models import Redirect
 
 
-def custom_reg_form_preview(request, id,
-        template_name="events/custom_reg_form_preview.html"):
+def custom_reg_form_preview(request, id, template_name="events/custom_reg_form_preview.html"):
     """
     Preview a custom registration form.
     """
     form = get_object_or_404(CustomRegForm, id=id)
 
-    form_for_form = FormForCustomRegForm(request.POST or None,
-        request.FILES or None, custom_reg_form=form, user=request.user)
+    form_for_form = FormForCustomRegForm(
+        request.POST or None,
+        request.FILES or None,
+        custom_reg_form=form,
+        user=request.user)
 
     for field in form_for_form.fields:
         try:
@@ -108,8 +147,7 @@ def custom_reg_form_preview(request, id,
 
 
 @login_required
-def event_custom_reg_form_list(request, event_id,
-                template_name="events/event_custom_reg_form_list.html"):
+def event_custom_reg_form_list(request, event_id, template_name="events/event_custom_reg_form_list.html"):
     """
     List custom registration forms for this event.
     """
@@ -1057,6 +1095,44 @@ def register_pre(request, event_id, template_name="events/reg8n/register_pre2.ht
 def multi_register_redirect(request, event, msg):
     messages.add_message(request, messages.INFO, msg)
     return HttpResponseRedirect(reverse('event', args=(event.pk,),))
+
+
+@is_enabled('events')
+@superuser_required
+def member_register(request, event_id,
+                    template_name="events/reg8n/member-register.html"):
+
+    event = get_object_or_404(Event, pk=event_id)
+
+    # check if event allows registration
+    if not (event.registration_configuration and
+            event.registration_configuration.enabled):
+        messages.add_message(
+            request, messages.INFO,
+            'Registration is disabled for event %s' % event)
+        return HttpResponseRedirect(reverse('event', args=[event_id]))
+
+    spots_taken, spots_available = event.get_spots_status()
+    reg_conf=event.registration_configuration
+    pricings = reg_conf.get_available_pricings(request.user,
+                                               is_strict=False,
+                                               spots_available=spots_available)
+    pricings = pricings.filter(quantity=1)
+
+    form = MemberRegistrationForm(event, pricings, request.POST or None)
+
+    if request.method == "POST":
+        if form.is_valid():
+            create_member_registration(request.user, event, form)
+            messages.add_message(
+                request, messages.SUCCESS,
+                'Successfully registered members for event %s' % event)
+            return HttpResponseRedirect(reverse('event', args=[event_id]))
+
+    return render_to_response(template_name, {
+        'event':event,
+        'form': form
+    }, context_instance=RequestContext(request))
 
 
 @is_enabled('events')
@@ -2208,8 +2284,10 @@ def reassign_type(request, type_id, form_class=ReassignTypeForm, template_name='
 
 @is_enabled('events')
 def global_registrant_search(request, template_name='events/registrants/global-search.html'):
+    if not has_perm(request.user, 'events.view_registrant'):
+        raise Http403
 
-    form = RegistrantSearchForm(request.GET)
+    form = GlobalRegistrantSearchForm(request.GET)
 
     if form.is_valid():
         event = form.cleaned_data.get('event')
@@ -2221,7 +2299,7 @@ def global_registrant_search(request, template_name='events/registrants/global-s
         email = form.cleaned_data.get('email')
         user_id = form.cleaned_data.get('user_id')
 
-    registrants = Registrant.objects.order_by("-update_dt")
+    registrants = Registrant.objects.filter(registration__invoice__isnull=False).order_by("-update_dt")
 
     if event:
         registrants = registrants.filter(registration__event=event)
@@ -2247,39 +2325,40 @@ def global_registrant_search(request, template_name='events/registrants/global-s
 @is_enabled('events')
 @login_required
 def registrant_search(request, event_id=0, template_name='events/registrants/search.html'):
-    query = request.GET.get('q', None)
-    page = request.GET.get('page', 1)
+    search_criteria = None
+    search_text = None
+    search_method = None
+    status = request.GET.get('status', None)
 
     event = get_object_or_404(Event, pk=event_id)
 
     if not (has_perm(request.user,'events.view_registrant') or has_perm(request.user,'events.change_event', event)):
         raise Http403
 
-    if not query:
-        # pull directly from db
-        sqs = Registrant.objects.filter(registration__event=event)
-        registrants = sqs.order_by("-update_dt")
-        active_registrants = sqs.filter(cancel_dt=None).order_by("-update_dt")
-        canceled_registrants = sqs.exclude(cancel_dt=None).order_by("-update_dt")
-    else:
-        sqs = SearchQuerySet().models(Registrant).filter(event_pk=event.id)
-        sqs = sqs.auto_query(sqs.query.clean(query))
-        registrants = sqs.order_by("-update_dt")
-        active_registrants = Registrant.objects.filter(registration__event=event).filter(cancel_dt=None).order_by("-update_dt")
-        canceled_registrants = Registrant.objects.filter(registration__event=event).exclude(cancel_dt=None).order_by("-update_dt")
+    form = EventRegistrantSearchForm(request.GET)
+    if form.is_valid():
+        search_criteria = form.cleaned_data.get('search_criteria')
+        search_text = form.cleaned_data.get('search_text')
+        search_method = form.cleaned_data.get('search_method')
 
-    all_registrants = registrants
+    registrants = Registrant.objects.filter(registration__event=event).order_by("-update_dt")
+    active_registrants = registrants.filter(cancel_dt=None).count()
+    canceled_registrants = registrants.exclude(cancel_dt=None).count()
 
-    if page:
-        registrants_paginator = Paginator(registrants, 10)
-        try:
-            registrants = registrants_paginator.page(page)
-        except PageNotAnInteger:
-            # If page is not an integer, deliver first page.
-            registrants = registrants_paginator.page(1)
-        except EmptyPage:
-            # If page is out of range (e.g. 9999), deliver last page of results.
-            registrants = registrants_paginator.page(registrants_paginator.num_pages)
+    if search_criteria and search_text:
+        search_type = '__iexact'
+        if search_method == 'starts_with':
+            search_type = '__istartswith'
+        elif search_method == 'contains':
+            search_type = '__icontains'
+        search_filter = {'%s%s' % (search_criteria,
+                                   search_type): search_text}
+        registrants = registrants.filter(**search_filter)
+
+    if status == 'active':
+        registrants = registrants.filter(cancel_dt=None)
+    elif status == 'canceled':
+        registrants = registrants.exclude(cancel_dt=None)
 
     for reg in registrants:
         if hasattr(reg, 'object'): reg = reg.object
@@ -2294,10 +2373,9 @@ def registrant_search(request, event_id=0, template_name='events/registrants/sea
     return render_to_response(template_name, {
         'event':event,
         'registrants':registrants,
-        'all_registrants': all_registrants,
         'active_registrants':active_registrants,
         'canceled_registrants':canceled_registrants,
-        'query': query,
+        'form':form,
         }, context_instance=RequestContext(request))
 
 
@@ -2308,6 +2386,7 @@ def registrant_roster(request, event_id=0, roster_view='', template_name='events
     from django.db.models import Sum
     event = get_object_or_404(Event, pk=event_id)
     has_addons = event.has_addons
+    discount_available = event.registration_configuration.discount_eligible
 
     if not (has_perm(request.user, 'events.view_registrant') or has_perm(request.user, 'events.change_event', event)):
         raise Http403
@@ -2517,6 +2596,7 @@ def registrant_roster(request, event_id=0, roster_view='', template_name='events
         'sort_order': sort_order,
         'sort_type': sort_type,
         'has_addons': has_addons,
+        'discount_available': discount_available,
         'addon_total_sum': addon_total_sum,
         'total_checked_in': total_checked_in}, context_instance=RequestContext(request))
 
@@ -3177,7 +3257,7 @@ def minimal_add(request, form_class=PendingEventForm, template_name="events/mini
             event.place = place
 
             # place event into pending queue
-            event.status = False
+            event.status = True
             event.status_detail = 'pending'
             event.save(log=False)
 
@@ -3187,6 +3267,20 @@ def minimal_add(request, form_class=PendingEventForm, template_name="events/mini
 
             messages.add_message(request, messages.SUCCESS,
                 'Your event submission has been received. It is now subject to approval.')
+            recipients = get_notice_recipients('site', 'global', 'allnoticerecipients')
+            admin_emails = get_setting('module', 'events', 'admin_emails').replace(" ", "").split(",")
+            
+            recipients = recipients + admin_emails
+            
+            if recipients and notification:
+                notification.send_emails(recipients, 'event_added', {
+                    'event':event,
+                    'user':request.user,
+                    'registrants_paid':event.registrants(with_balance=False),
+                    'registrants_pending':event.registrants(with_balance=True),
+                    'SITE_GLOBAL_SITEDISPLAYNAME': get_setting('site', 'global', 'sitedisplayname'),
+                    'SITE_GLOBAL_SITEURL': get_setting('site', 'global', 'siteurl'),
+                })
             return redirect('events')
     else:
         form = form_class(user=request.user, prefix="event")
@@ -3207,7 +3301,7 @@ def pending(request, template_name="events/pending.html"):
     if not request.user.profile.is_superuser:
         raise Http403
 
-    events = Event.objects.filter(status=False, status_detail='pending').order_by('start_dt')
+    events = Event.objects.filter(status=True, status_detail='pending').order_by('start_dt')
 
     EventLog.objects.log()
 

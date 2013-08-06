@@ -128,9 +128,10 @@ class Profile(Person):
         return self.user.username
 
     def get_name(self):
-
+        """
+        Returns name first_name + last_name
+        """
         user = self.user
-
         name = "%s %s" % (user.first_name, user.last_name)
         name = name.strip()
 
@@ -234,7 +235,7 @@ class Profile(Person):
         return False
 
     def get_groups(self):
-        memberships = self.user.group_member.all()
+        memberships = self.user.group_member.filter(group__status=True)
         return [membership.group for membership in memberships]
 
     def refresh_member_number(self):

@@ -317,10 +317,10 @@ def query_price(request):
 
 @is_enabled('jobs')
 @login_required
-def edit(request, id, form_class=JobForm, template_name="jobs/edit.html", object_type=Job, success_redirect='job'):
-    job = get_object_or_404(Job, pk=id)
+def edit(request, id, form_class=JobForm, template_name="jobs/edit.html", object_type=Job, success_redirect='job', job_change_perm='jobs.change_job'):
+    job = get_object_or_404(object_type, pk=id)
 
-    if not has_perm(request.user, 'jobs.change_job', job):
+    if not has_perm(request.user, job_change_perm, job):
         raise Http403
 
     form = form_class(request.POST or None,
@@ -328,9 +328,11 @@ def edit(request, id, form_class=JobForm, template_name="jobs/edit.html", object
                         user=request.user)
 
     #setup categories
-    content_type = get_object_or_404(ContentType, app_label='jobs',model='job')
+    content_type = get_object_or_404(ContentType, app_label=object_type._meta.app_label, model=object_type._meta.module_name)
+
     category = Category.objects.get_for_object(job,'category')
     sub_category = Category.objects.get_for_object(job,'sub_category')
+
     initial_category_form_data = {
         'app_label': 'jobs',
         'model': 'job',

@@ -102,7 +102,7 @@ def index(request, username='', template_name="profiles/index.html"):
             additional_owners.remove(profile.owner)
 
     # group list
-    group_memberships = user_this.group_member.all()
+    group_memberships = user_this.group_member.filter(group__status=True)
 
     active_qs = Q(status_detail__iexact='active')
     pending_qs = Q(status_detail__iexact='pending')
@@ -294,7 +294,8 @@ def search(request, template_name="profiles/search.html"):
                 # show non-members only
                 profiles = profiles.filter(member_number='')
 
-        profiles = profiles.exclude(hide_in_search=True)
+        if not has_perm(request.user, 'profiles.view_profile'):
+            profiles = profiles.exclude(hide_in_search=True)
 
     if membership_type:
         profiles = profiles.filter(

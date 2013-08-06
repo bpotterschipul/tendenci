@@ -37,6 +37,7 @@ It's best practice to make a virtual environment for your site. You will need `v
 
     virtualenv venv
     source venv/bin/activate
+    pip install setuptools --upgrade
 
 Install Tendenci. This download and install step may take a few minutes.
 ::

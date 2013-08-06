@@ -4,8 +4,8 @@ import uuid
 import Image
 import re
 from slate import PDF
-import urllib
 import cStringIO
+from base64 import b64encode
 
 from django.db import models, connection
 from django.conf import settings
@@ -15,20 +15,13 @@ from django.contrib.contenttypes import generic
 from django.core.files.storage import default_storage
 
 from tagging.fields import TagField
-
 from tendenci.libs.boto_s3.utils import set_s3_file_permission
-
 from tendenci.apps.user_groups.models import Group
 from tendenci.apps.user_groups.utils import get_default_group
 from tendenci.core.perms.models import TendenciBaseModel
 from tendenci.core.perms.object_perms import ObjectPermission
 from tendenci.core.files.managers import FileManager
-from tendenci.core.site_settings.utils import get_setting
 from tendenci.core.categories.models import CategoryItem
-
-from tendenci.apps.redirects.models import Redirect
-from django.http import HttpResponseRedirect
-from django.shortcuts import get_object_or_404
 
 
 def file_directory(instance, filename):
@@ -256,3 +249,26 @@ class File(TendenciBaseModel):
             else:
                 return "%s%s" % (settings.MEDIA_URL, self.file)
         return None
+
+    def get_content(self):
+        if self.content_type and self.object_id:
+            try:
+                model = self.content_type.model_class()
+                return model.objects.get(pk=self.object_id)
+            except:
+                return None
+        else:
+            for r_object in self._meta.get_all_related_objects():
+                if hasattr(self, r_object.var_name):
+                    return getattr(self, r_object.var_name)
+            return None
+
+    def get_binary(self, **kwargs):
+        """
+        Returns binary in encoding base64.
+        """
+        from tendenci.core.files.utils import build_image
+        size = kwargs.get('size') or self.image_dimensions()
+
+        binary = build_image(self.file, size, 'FILE_IMAGE_PRE_KEY')
+        return b64encode(binary)

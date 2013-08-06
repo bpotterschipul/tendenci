@@ -420,6 +420,7 @@ def form_detail(request, slug, template="forms/form_detail.html"):
             else:
                 entry.creator = request.user
             entry.save()
+            entry.set_group_subscribers()
 
             # Email
             subject = generate_email_subject(form, entry)
@@ -530,7 +531,7 @@ def form_detail(request, slug, template="forms/form_detail.html"):
 
             # default redirect
             if form.completion_url:
-                return redirect(form.completion_url)
+                return HttpResponseRedirect(form.completion_url)
             return redirect("form_sent", form.slug)
     # set form's template to default if no template or template doesn't exist
     if not form.template or not template_exists(form.template):

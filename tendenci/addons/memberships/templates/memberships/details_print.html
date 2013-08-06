@@ -14,29 +14,11 @@
 <link rel="stylesheet" href="{{ STATIC_URL }}css/memberships.css">
 <link rel="stylesheet" href="{{ STATIC_URL }}css/bootstrap-navbar.css">
 
-<style>
-    .t .membership-details-status {
-        border-left: none;
-        width: 220px;
-        text-align: right;
-    }
-    .t .membership-details-status .status-label {
-        color: black;
-        font-size: 1.2em;
-        background-color: white;
-        padding: 0;
-        border-bottom: none;
-    }
-    .t .membership-detail-nav {
-        display: none;
-    }
-</style>
-
 {% endblock %}
 
 {% block body %}
 <div class="t">
-    <div class="membership-detail-wrap">
+    <div class="membership-detail-wrap membership-detail-print">
 
         <fieldset>
             <div class="membership-details-inner-wrap">
@@ -96,11 +78,11 @@
 
                     <div class="membership-details-status">
                         
-                        <div class="status-label {{ membership.get_status }}">
-                            {{ membership.get_status|capfirst }} Membership</div>
+                        <p class="status-label {{ membership.get_status }}">
+                            {{ membership.get_status|capfirst }} Membership</p>
 
-                        <div class="status-label">
-                            Balance Due: ${{ membership.get_invoice.balance|floatformat:"2" }}</div>
+                        <p class="status-label">
+                            Balance Due: ${{ membership.get_invoice.balance|floatformat:"2" }}</p>
 
                     </div>
 
@@ -110,7 +92,61 @@
         </fieldset>
 
         <fieldset>
-            <label>More Details</label>
+            <legend>Contact Information</legend>
+
+            {% if membership.user.email %}
+            <div class="field">
+                <div class="label">Email</div>
+                <div class="value">{{ membership.user.email }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.phone %}
+            <div class="field">
+                <div class="label">Phone</div>
+                <div class="value">{{ membership.user.profile.phone }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.work_phone %}
+            <div class="field">
+                <div class="label">Work Phone</div>
+                <div class="value">{{ membership.user.profile.work_phone }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.home_phone %}
+            <div class="field">
+                <div class="label">Home Phone</div>
+                <div class="value">{{ membership.user.profile.home_phone }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.mobile_phone %}
+            <div class="field">
+                <div class="label">Mobile Phone</div>
+                <div class="value">{{ membership.user.profile.mobile_phone }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.url %}
+            <div class="field">
+                <div class="label">Website</div>
+                <div class="value">{{ membership.user.profile.url }}</div>
+            </div>
+            {% endif %}
+
+            {% if membership.user.profile.get_address %}
+            <div class="field">
+                <div class="label">Address</div>
+                <div class="value">{{ membership.user.profile.get_address }}</div>
+            </div>
+            {% endif %}
+
+        </fieldset>
+
+        <fieldset>
+            <legend>More Details</legend>
 
             {% if membership.certifications %}
             <div class="field">
@@ -388,7 +424,7 @@
 
         {% if membership.get_demographics %}
         <fieldset>
-            <label>Even More Details (custom fields)</label>
+            <legend>Even More Details (custom fields)</legend>
             {% for label, value in membership.get_demographics %}
                 {% if value %}
                 <div class="field">

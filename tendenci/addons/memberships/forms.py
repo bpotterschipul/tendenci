@@ -487,12 +487,26 @@ class MembershipAppFieldAdminForm(forms.ModelForm):
                 'css_class'
                   )
 
+    def __init__(self, *args, **kwargs):
+        super(MembershipAppFieldAdminForm, self).__init__(*args, **kwargs)
+        if self.instance:
+            if not self.instance.field_name:
+                self.fields['field_type'].choices = MembershipAppField.FIELD_TYPE_CHOICES2
+            else:
+                self.fields['field_type'].choices = MembershipAppField.FIELD_TYPE_CHOICES1
+        
+
     def save(self, *args, **kwargs):
         self.instance = super(MembershipAppFieldAdminForm, self).save(*args, **kwargs)
-        if self.instance and not self.instance.field_name:
-            if self.instance.field_type != 'section_break':
-                self.instance.field_type = 'section_break'
-                self.instance.save()
+        if self.instance:
+            if not self.instance.field_name:
+                if self.instance.field_type != 'section_break':
+                    self.instance.field_type = 'section_break'
+                    self.instance.save()
+            else:
+                if self.instance.field_type == 'section_break':
+                    self.instance.field_type = 'CharField'
+                    self.instance.save()
         return self.instance
 
 
@@ -598,12 +612,24 @@ class UserForm(forms.ModelForm):
         model = User
 
     def __init__(self, app_field_objs, *args, **kwargs):
+        request = kwargs.pop('request')
         super(UserForm, self).__init__(*args, **kwargs)
 
         del self.fields['groups']
 
         assign_fields(self, app_field_objs)
         self_fields_keys = self.fields.keys()
+
+        is_renewal = 'username' in request.GET
+        if request.user.is_superuser and is_renewal:
+            if 'username' in self_fields_keys:
+                self_fields_keys.remove('username')
+            if 'password' in self_fields_keys:
+                self_fields_keys.remove('password')
+            if 'username' in self.fields:
+                self.fields.pop('username')
+            if 'password' in self.fields:
+                self.fields.pop('password')
 
         if 'password' in self_fields_keys:
 
@@ -753,9 +779,8 @@ class MembershipDefault2Form(forms.ModelForm):
             ('archive', 'Archive'),
                              )
     STATUS_CHOICES = (
-                      (1, 'Active'),
-                      (0, 'Inactive')
-                      )
+        (1, 'Active'),
+        (0, 'Inactive'))
 
     discount_code = forms.CharField(label=_('Discount Code'), required=False)
 
